@@ -364,8 +364,16 @@ class AddFragmentsNode(AstNode):
         def check_and_set_builtin_fragment(fragment, data, builtin_fragments):
             prefix, value = fragment.split('/', 1)
             if prefix in builtin_fragments.keys():
+                fragment_history = data.varhistory.variable(self.fragments_variable)
+                loginfo={}
+                for fh in fragment_history[::-1]:
+                    if fh['op'] in ("set", "append") and fragment in fh["detail"]:
+                        loginfo["file"]   = fh["file"]
+                        loginfo["line"]   = fh["line"]
+                        loginfo["detail"] = f"{value} ({self.fragments_variable} contains \"{fragment}\")"
+                        break
                 # parsing=True since we want to emulate X=Y and allow X:override=Z to continue to exist
-                data.setVar(builtin_fragments[prefix], value, parsing=True)
+                data.setVar(builtin_fragments[prefix], value, parsing=True, **loginfo)
                 return True
             return False
 
@@ -376,6 +384,27 @@ class AddFragmentsNode(AstNode):
 
         if not fragments:
             return
+
+        # Check for multiple builtin fragments setting the same variable
+        for builtin_fragment_key in builtin_fragments.keys():
+            builtin_fragments_list = list(
+                filter(
+                    lambda f: f.startswith(builtin_fragment_key + "/"),
+                    fragments.split(),
+                )
+            )
+            if len(builtin_fragments_list) > 1:
+                bb.warn(
+                    ("Multiple builtin fragments are enabled for %s via variable %s: %s. "
+                     "This likely points to a mis-configuration in the metadata, as only "
+                     "one of them should be set. The build will use the last value.")
+                    % (
+                        builtin_fragment_key,
+                        self.fragments_variable,
+                        " ".join(builtin_fragments_list),
+                    )
+                )
+
         for f in fragments.split():
             if check_and_set_builtin_fragment(f, data, builtin_fragments):
                 continue
